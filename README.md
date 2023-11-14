@@ -3,3 +3,12 @@ Inspired by arcade games of the past like Super Off Road or Skidmarks; Dune Jump
 
 ## Dev Environment Instructions
 Feel free to work in your IDE of choice
+
+If using github codespaces, a basic way to view the project is
+
+start codespaces  
+install and start http-server
+```
+$ npm i -g http-server
+$ http-server
+```
