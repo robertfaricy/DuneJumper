@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<title>Hello WebGL</title>
+	<meta name="generator" content="BBEdit 10.5" />
+
+<!-- load matrix manipulation helper methods -->	
+<script type="text/javascript" src="glMatrix_util.js"></script>
+<script type="text/javascript" src="webgl-utils.js"></script>
+
+
+<script id="shader-fs" type="x-shader/x-fragment">
+    precision mediump float;
+
+    varying vec2 vTextureCoord;
+    varying float vLightWeighting;
+    varying float vDistanceFromCamera;
+    varying float vHeight;  // Receive height from vertex shader
+
+    uniform sampler2D uSampler;
+
+    void main(void) {
+        vec4 textureColor = texture2D(uSampler, vec2(vTextureCoord.s, vTextureCoord.t));
+        vec3 lightEffect = textureColor.rgb * vLightWeighting;
+    
+        // Incorporate the lighting effects:
+        textureColor.rgb = mix(textureColor.rgb , lightEffect, 0.5);
+        
+        gl_FragColor = vec4(textureColor.rgb , textureColor.a);
+    }
+    
+</script>
+
+<script id="shader-vs" type="x-shader/x-vertex">
+    attribute vec3 aVertexPosition;
+    attribute vec2 aTextureCoord;
+    attribute vec3 aVertexNormal;
+
+    uniform mat4 uMVMatrix;
+    uniform mat4 uPMatrix;
+    uniform vec3 uLightDirection;
+    uniform vec3 uAmbientLight;
+    uniform sampler2D uSampler;
+
+    varying vec2 vTextureCoord;
+    varying float vLightWeighting;
+    varying float vDistanceFromCamera;
+    varying float vHeight;  // Send height to fragment shader
+
+    void main(void) {
+        vec4 textureValue = texture2D(uSampler, aTextureCoord);
+        float displacement = 0.299 * textureValue.r + 0.587 * textureValue.g + 0.114 * textureValue.b;
+        float displacementFactor = 0.08; // Adjust this factor as per your requirement
+        displacement *= displacementFactor;
+
+
+        vec3 displacedPosition = vec3(aVertexPosition.x, aVertexPosition.y + displacement, aVertexPosition.z);
+
+        gl_Position = uPMatrix * uMVMatrix * vec4(displacedPosition, 1.0);
+        vTextureCoord = aTextureCoord;
+
+        vec3 transformedNormal = normalize(mat3(uMVMatrix) * aVertexNormal);
+        float directionalLightWeighting = max(dot(transformedNormal, uLightDirection), 0.0);
+        vLightWeighting = length(uAmbientLight) + directionalLightWeighting;
+        
+        vec3 reflectionVector = normalize(reflect(-uLightDirection, transformedNormal));
+        vec3 viewDir = normalize(-aVertexPosition); 
+
+        vDistanceFromCamera = length(aVertexPosition.xyz);
+        vHeight = displacedPosition.y;
+    }
+</script>
+
+<script> <!-- define Javascript functions for drawing WebGL items -->
+
+var gl;
+
+function initWebGLContext(aname) {
+  gl = null;
+  var canvas = document.getElementById(aname);
+  try {
+    // Try to grab the standard context. If it fails, fallback to experimental.
+    gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+  }
+  catch(e) {}
+  
+  // If we don't have a GL context, give up now
+  if (!gl) {
+    alert("Unable to initialize WebGL. Your browser may not support it.");
+    gl = null;
+  }
+  gl.viewportWidth = canvas.width;
+  gl.viewportHeight = canvas.height;
+  return gl;
+}
+// define the function to initial WebGL and Setup Geometry Objects
+function initGLScene()
+{
+    // Initialize the WebGL Context - the gl engine for drawing things.
+    var gl = initWebGLContext("hellowebgl"); // The id of the Canvas Element
+        if (!gl) // if fails simply return
+     {
+          return;
+     }
+     // succeeded in initializing WebGL system
+     return gl;     
+}
+
+
+   function getShader(gl, id) {
+        var shaderScript = document.getElementById(id);
+        if (!shaderScript) {
+            return null;
+        }
+
+        var str = "";
+        var k = shaderScript.firstChild;
+        while (k) {
+            if (k.nodeType == 3) {
+                str += k.textContent;
+            }
+            k = k.nextSibling;
+        }
+
+        var shader;
+        if (shaderScript.type == "x-shader/x-fragment") {
+            shader = gl.createShader(gl.FRAGMENT_SHADER);
+        } else if (shaderScript.type == "x-shader/x-vertex") {
+            shader = gl.createShader(gl.VERTEX_SHADER);
+        } else {
+            return null;
+        }
+
+        gl.shaderSource(shader, str);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            alert(gl.getShaderInfoLog(shader));
+            return null;
+        }
+
+        return shader;
+    }
+
+
+    var shaderProgram;
+
+    function initShaders() {
+        var fragmentShader = getShader(gl, "shader-fs");
+        var vertexShader = getShader(gl, "shader-vs");
+
+        shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+            alert("Could not initialise shaders");
+        }
+
+        gl.useProgram(shaderProgram);
+
+        shaderProgram.vertexNormalAttribute = gl.getAttribLocation(shaderProgram, "aVertexNormal");
+        gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
+
+        shaderProgram.lightDirectionUniform = gl.getUniformLocation(shaderProgram, "uLightDirection");
+        shaderProgram.ambientLightUniform = gl.getUniformLocation(shaderProgram, "uAmbientLight");
+
+
+        shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+        gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+
+        shaderProgram.textureCoordAttribute = gl.getAttribLocation(shaderProgram, "aTextureCoord");
+        gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
+
+        shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
+        shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+        shaderProgram.samplerUniform = gl.getUniformLocation(shaderProgram, "uSampler");
+    }
+
+
+
+// create our basic model and view matrix
+var mvMatrix = mat4.create();
+var mvMatrixStack = [];
+// create our projection matrix for projecting from 3D to 2D.
+var pMatrix = mat4.create();
+
+ function mvPushMatrix() {
+        var copy = mat4.create();
+        mat4.set(mvMatrix, copy);
+        mvMatrixStack.push(copy);
+    }
+
+    function mvPopMatrix() {
+        if (mvMatrixStack.length == 0) {
+            throw "Invalid popMatrix!";
+        }
+        mvMatrix = mvMatrixStack.pop();
+    }
+
+function setMatrixUniforms()
+{
+        gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
+        gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
+}
+
+
+
+
+//create and initialize our geometry objects
+var gridVertexPositionBuffer;
+var gridVertexNormalBuffer;
+var gridVertexTextureCoordBuffer;
+var gridVertexIndexBuffer;
+
+function initGridGeometry() {
+    var vertices = [];
+    var normals = [];
+    var size = 256;
+    var step = 2.0 / size;
+
+    for (var i = 0; i < size; i++) {
+        for (var j = 0; j < size; j++) {
+            var x = -1.0 + i * step;
+            var z = -1.0 + j * step;
+            var y = 0.0;
+            
+            vertices.push(x, y, z);
+            normals.push(0, 1, 0);
+        }
+    }
+
+    // Initialize vertex position buffer
+    gridVertexPositionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, gridVertexPositionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+    gridVertexPositionBuffer.itemSize = 3;
+    gridVertexPositionBuffer.numItems = vertices.length / 3;
+
+    // Initialize normals buffer
+    gridVertexNormalBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, gridVertexNormalBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
+    gridVertexNormalBuffer.itemSize = 3;
+    gridVertexNormalBuffer.numItems = normals.length / 3;
+
+    // Texture coordinates for grid
+    var texCoords = [];
+    for (var i = 0; i < size; i++) {
+        for (var j = 0; j < size; j++) {
+            texCoords.push(i / (size - 1));
+            texCoords.push(j / (size - 1));
+        }
+    }
+
+    gridVertexTextureCoordBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, gridVertexTextureCoordBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(texCoords), gl.STATIC_DRAW);
+    gridVertexTextureCoordBuffer.itemSize = 2;
+    gridVertexTextureCoordBuffer.numItems = size * size;
+
+    // Indices for grid
+    var indices = [];
+    for (var i = 0; i < size - 1; i++) {
+        for (var j = 0; j < size - 1; j++) {
+            var first = i * size + j;
+            var second = first + size;
+            indices.push(first, second, first + 1);
+            indices.push(second, second + 1, first + 1);
+        }
+    }
+
+    gridVertexIndexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gridVertexIndexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+    gridVertexIndexBuffer.itemSize = 1;
+    gridVertexIndexBuffer.numItems = indices.length;
+}
+
+
+
+// Initialize our texture data and prepare it for rendering
+var exTexture;
+function initTextures()
+{
+    exTexture = gl.createTexture();
+    exTexture.image = new Image();
+    exTexture.image.onload = function() {
+      handleLoadedTexture(exTexture)
+    }
+    exTexture.image.src = "grassandfields.jpg";
+  }
+
+function handleLoadedTexture(texture)
+{
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, texture.image);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+  }
+
+
+
+// Mouse Controls
+        let isMouseDown = false;
+        let mouseLastX = null;
+        let mouseLastY = null;
+        let zoom = -5.0;
+        var xRot = 0;
+        var yRot = 0;
+        
+        // Define your functions
+        function handleMouseDown(event) {
+            
+            autoRotate = false; //mouse left click disables auto rotation
+
+            isMouseDown = true;
+            lastX = event.clientX;
+            lastY = event.clientY;
+        }
+
+        function handleMouseUp(event) {
+            isMouseDown = false;
+        }
+
+        function handleMouseMove(event) {
+            if (!isMouseDown) return;
+            let deltaX = event.clientX - lastX;
+            let deltaY = event.clientY - lastY;
+            xRot += deltaY / 10.0;
+            yRot += deltaX / 10.0;
+            lastX = event.clientX;
+            lastY = event.clientY;
+            drawScene();  // Assuming you have a drawScene function defined
+        }
+
+        function handleMouseWheel(event) {
+            zoom += (event.deltaY < 0) ? 0.5 : -0.5;
+            drawScene();
+        }
+
+
+//Initialize everything for starting up a simple webGL application
+function startHelloWebGL()
+{
+   // attach 'Handler' functions to handle events generated by the canvas.
+   // for when the browser is resized or closed.
+
+   // first initialize webgl components 
+   var gl = initGLScene();
+   
+   // now build basic geometry objects.
+   initShaders();
+   initGridGeometry(); // Initialize the grid
+   initTextures();
+   
+   gl.clearColor(0.4,0.4,0.4,1.0);
+   gl.enable(gl.DEPTH_TEST);
+   // Draw the Scene
+   Frames();
+   // If doing an animation need to add code to rotate our geometry
+
+   // Add mouse event handlers
+    var canvas = document.getElementById("hellowebgl");
+    canvas.onmousedown = handleMouseDown;
+    document.onmouseup = handleMouseUp;
+    document.onmousemove = handleMouseMove;
+    canvas.oncontextmenu = function (e) { e.preventDefault(); }; 
+    canvas.onwheel = handleMouseWheel;
+   
+}
+
+// This function draws a basic webGL scene
+// first it clears the framebuffer.
+// then we define our View positions for our camera using WebGL matrices.
+// OpenGL has convenience methods for this such as glPerspective().
+// finally we call the gl draw methods to draw our defined geometry objects.
+var zRot = 0;
+
+    function drawScene() {
+    gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    mat4.perspective(90, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0, pMatrix);
+    mat4.identity(mvMatrix);
+
+    mat4.translate(mvMatrix, [0.0, -0.2, zoom]);  // Apply the zoom
+    
+    
+    // Applying both rotations
+    mat4.rotate(mvMatrix, xRot/180.0*3.1415, [1, 0, 0]);
+    mat4.rotate(mvMatrix, yRot/180.0*3.1415, [0, 1, 0]);
+    mat4.rotate(mvMatrix, zRot/180.0*3.1415, [0, 0, 1]);
+
+    // Implement the light direction and ambient light before drawing the grid
+    var lightingDirection = vec3.create([0.0, -1.0, 0.0]);
+    vec3.normalize(lightingDirection);
+    vec3.scale(lightingDirection, -1);
+    gl.uniform3fv(shaderProgram.lightDirectionUniform, lightingDirection);
+    gl.uniform3fv(shaderProgram.ambientLightUniform, [0.0, 0.5, 0.0]);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, gridVertexNormalBuffer);
+    gl.vertexAttribPointer(shaderProgram.vertexNormalAttribute, gridVertexNormalBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, gridVertexPositionBuffer);
+    gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, gridVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gridVertexTextureCoordBuffer);
+    gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, gridVertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, exTexture); 
+    gl.uniform1i(shaderProgram.samplerUniform, 0);
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gridVertexIndexBuffer);
+    
+    gl.drawElements(gl.TRIANGLES, gridVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+    setMatrixUniforms();
+}
+
+
+
+    var amplitude = 9;
+    var frequency = 0.0005;
+    var lastTime = 0;
+    let autoRotate = true;
+    function animate() {
+        var timeNow = new Date().getTime();
+        if (lastTime != 0) {
+        var elapsed = timeNow - lastTime;
+        
+        if (autoRotate) {
+        //bob up and down so user can see top and bottom
+        xRot = amplitude * Math.sin(frequency * timeNow); 
+        yRot = yRot + 0.08; //rotate left-right
+        }
+
+    }
+    lastTime = timeNow;
+    }
+
+
+    function Frames() {
+        requestAnimFrame(Frames);
+        drawScene();
+        animate();
+    }
+
+
+</script>
+
+</head>
+
+<!-- declare the "body" of the HTML document-->
+<!-- the onload attribute specifies a javascript function to execute when the body tag is loaded into the browser -->
+
+<body onload="startHelloWebGL()">
+<h1>Hello WebGL Simple Example</h1>
+
+<!-- embed the HTML5 Canvas Drawing object on the page.-->
+<!-- Name the canvas 'hellowebgl' for the javascript code. -->
+<canvas id="hellowebgl" width=640 height=480>
+If you're seeing this your web browser doesn't support the &lt;canvas>&gt; element. Ouch!
+</canvas>
+
+</body>
+</html>
